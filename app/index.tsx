@@ -1,6 +1,9 @@
-import { LinearGradient } from "expo-linear-gradient"; // Expo 사용 시
+import axios from "axios";
+import { LinearGradient } from "expo-linear-gradient";
 import React, { useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -10,21 +13,61 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-export default function App() {
-  const [luckyNumbers, setLuckyNumbers] = useState([
-    [7, 12, 23, 33, 35, 45],
-    [1, 14, 19, 21, 34, 42],
-  ]);
+// ⚠️ 본인의 환경에 맞는 서버 주소로 변경하세요!
+// iOS 시뮬레이터: 'http://localhost:3000/lotto/analyze'
+// Android 에뮬레이터: 'http://10.0.2.2:3000/lotto/analyze'
+// 실제 기기: 'http://192.168.x.x:3000/lotto/analyze' (터미널에서 ipconfig/ifconfig 확인)
+const SERVER_URL = "http://192.168.219.102:3000/lotto/analyze";
 
+export interface LottoCombination {
+  numbers: number[];
+  theme: string;
+}
+
+export default function App() {
+  // 데이터 상태 관리
+  const [luckyNumbers, setLuckyNumbers] = useState<LottoCombination[]>([]);
   const [analysisReport, setAnalysisReport] = useState(
-    "이번 주는 30번대 번호의 출현 빈도가 높을 것으로 예상됩니다. 미출현 번호였던 12번을 주목하세요."
+    "아직 분석된 내용이 없습니다. 아래 버튼을 눌러주세요!"
   );
+
+  // 로딩 상태 관리 (AI가 생각하는 동안 뺑뺑이 돌리기 위함)
+  const [isLoading, setIsLoading] = useState(false);
+
+  // API 호출 함수
+  const fetchLottoAnalysis = async () => {
+    setIsLoading(true); // 로딩 시작
+    try {
+      // NestJS 백엔드로 요청 전송
+      const response = await axios.get<{
+        report: string;
+        combinations: LottoCombination[];
+      }>(SERVER_URL);
+
+      const { report, combinations } = response.data;
+
+      console.info("reprot", report);
+      console.info("combinations", combinations);
+
+      // 상태 업데이트 (화면 갱신)
+      setAnalysisReport(report);
+      setLuckyNumbers(combinations);
+    } catch (error) {
+      console.error("API Error:", error);
+      Alert.alert(
+        "오류 발생",
+        "서버와 연결할 수 없습니다.\nIP주소나 서버 상태를 확인해주세요."
+      );
+    } finally {
+      setIsLoading(false); // 로딩 끝 (성공하든 실패하든)
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* 헤더 섹션 */}
+        {/* 헤더 */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>금요일의 행운 🍀</Text>
           <Text style={styles.headerSubtitle}>
@@ -35,35 +78,64 @@ export default function App() {
         {/* AI 분석 리포트 카드 */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>🤖 AI 분석 리포트</Text>
-          <Text style={styles.reportText}>{analysisReport}</Text>
+          <Text style={styles.reportText}>
+            {isLoading
+              ? "Gemini가 최근 3년 데이터를 분석 중입니다..."
+              : analysisReport}
+          </Text>
         </View>
 
         {/* 추천 번호 리스트 */}
         <View style={styles.numbersSection}>
           <Text style={styles.sectionTitle}>추천 조합</Text>
-          {luckyNumbers.map((set, index) => (
-            <View key={index} style={styles.numberRow}>
-              <View style={styles.setTag}>
-                <Text style={styles.setText}>{index + 1}세트</Text>
-              </View>
-              <View style={styles.ballContainer}>
-                {set.map((num) => (
-                  <View key={num} style={[styles.ball, getBallColor(num)]}>
-                    <Text style={styles.ballText}>{num}</Text>
-                  </View>
-                ))}
-              </View>
+
+          {isLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#00ffcc" />
+              <Text style={styles.loadingText}>번호 생성 중...</Text>
             </View>
-          ))}
+          ) : luckyNumbers.length > 0 ? (
+            // [수정] item 구조 변경: { numbers: [], theme: "" }
+            luckyNumbers.map((item, index) => (
+              <View key={index} style={styles.numberRow}>
+                {/* 왼쪽: 테마 표시 영역 (기존 '1세트' 대신 실제 테마 출력) */}
+                <View style={styles.setTag}>
+                  <Text style={styles.setText}>
+                    {item.theme || `${index + 1}세트`}{" "}
+                    {/* theme이 없으면 세트 번호 */}
+                  </Text>
+                </View>
+
+                {/* 오른쪽: 번호 공 그리기 (item.numbers 배열 순회) */}
+                <View style={styles.ballContainer}>
+                  {item.numbers.map((num) => (
+                    <View key={num} style={[styles.ball, getBallColor(num)]}>
+                      <Text style={styles.ballText}>{num}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.emptyText}>
+              버튼을 눌러 번호를 생성해보세요!
+            </Text>
+          )}
         </View>
 
-        {/* 분석 요청 버튼 */}
-        <TouchableOpacity style={styles.button}>
+        {/* 분석 요청 버튼 (로딩 중엔 비활성화) */}
+        <TouchableOpacity
+          style={[styles.button, isLoading && styles.buttonDisabled]}
+          onPress={fetchLottoAnalysis}
+          disabled={isLoading}
+        >
           <LinearGradient
-            colors={["#6a11cb", "#2575fc"]}
+            colors={isLoading ? ["#555", "#555"] : ["#6a11cb", "#2575fc"]}
             style={styles.gradientButton}
           >
-            <Text style={styles.buttonText}>새로운 조합 분석하기</Text>
+            <Text style={styles.buttonText}>
+              {isLoading ? "분석 중..." : "AI에게 번호 추천받기"}
+            </Text>
           </LinearGradient>
         </TouchableOpacity>
       </ScrollView>
@@ -71,7 +143,7 @@ export default function App() {
   );
 }
 
-// 번호 대역별 색상 지정 함수
+// 번호 색상 함수 (그대로 유지)
 const getBallColor = (num: number) => {
   if (num <= 10) return { backgroundColor: "#fbc400" };
   if (num <= 20) return { backgroundColor: "#69c8f2" };
@@ -101,7 +173,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
   },
   reportText: { color: "#ddd", lineHeight: 22 },
-  numbersSection: { marginBottom: 30 },
+  numbersSection: { marginBottom: 30, minHeight: 150 }, // 높이 확보
   sectionTitle: {
     fontSize: 20,
     fontWeight: "bold",
@@ -109,24 +181,30 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   numberRow: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: "column", // [변경] 모바일 화면이 좁을 수 있으니 상하 배치 고려
+    alignItems: "flex-start", // 왼쪽 정렬
     backgroundColor: "#1e1e1e",
     padding: 15,
     borderRadius: 12,
-    marginBottom: 10,
+    marginBottom: 15, // 간격 조금 더 벌림
   },
   setTag: {
-    marginRight: 10,
     backgroundColor: "#333",
-    padding: 5,
-    borderRadius: 5,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    marginBottom: 10, // 번호와 테마 사이 간격
+    alignSelf: "flex-start",
   },
-  setText: { color: "#fff", fontSize: 12 },
+  setText: {
+    color: "#00ffcc", // 테마는 강조색으로 변경
+    fontSize: 14,
+    fontWeight: "bold",
+  },
   ballContainer: {
     flexDirection: "row",
-    flex: 1,
-    justifyContent: "space-around",
+    justifyContent: "space-between",
+    width: "100%", // 가로 꽉 채우기
   },
   ball: {
     width: 36,
@@ -137,6 +215,16 @@ const styles = StyleSheet.create({
   },
   ballText: { color: "#fff", fontWeight: "bold" },
   button: { marginTop: 10, borderRadius: 12, overflow: "hidden" },
+  buttonDisabled: { opacity: 0.7 },
   gradientButton: { paddingVertical: 15, alignItems: "center" },
   buttonText: { color: "#fff", fontSize: 18, fontWeight: "bold" },
+
+  // 로딩 및 빈 상태 스타일 추가
+  loadingContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+  loadingText: { color: "#00ffcc", marginTop: 10 },
+  emptyText: { color: "#777", textAlign: "center", marginTop: 20 },
 });
